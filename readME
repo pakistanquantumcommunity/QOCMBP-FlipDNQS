@@ -1,4 +1,6 @@
 Quantum Optimal Control for Mitigating Bit-Flip, Phase-Flip, and Depolarizing Noise in Quantum Systems
+
+
 Overview
 This repository contains Quantum Optimal Control for Mitigating Bit-Flip, Phase-Flip, and Depolarizing Noise in Quantum Systems, submitted by Muhammad Hasnain on August 22, 2025. The project focuses on optimizing a quantum X-gate using a GRAPE-like (Gradient Ascent Pulse Engineering) algorithm and comparing its performance against a standard X-gate. The implementation leverages Qiskit for quantum circuit simulation and execution, with support for both IBM Quantum backends and a noisy simulator.
 The project includes:
