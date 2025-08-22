@@ -1,1 +1,127 @@
+Quantum Optimal Control for Mitigating Bit-Flip, Phase-Flip, and Depolarizing Noise in Quantum Systems
+Overview
+This repository contains Quantum Optimal Control for Mitigating Bit-Flip, Phase-Flip, and Depolarizing Noise in Quantum Systems, submitted by Muhammad Hasnain on August 22, 2025. The project focuses on optimizing a quantum X-gate using a GRAPE-like (Gradient Ascent Pulse Engineering) algorithm and comparing its performance against a standard X-gate. The implementation leverages Qiskit for quantum circuit simulation and execution, with support for both IBM Quantum backends and a noisy simulator.
+The project includes:
+
+Pulse Optimization: A GRAPE-like algorithm to optimize control pulses for a custom X-gate.
+Quantum Circuit Execution: Comparison of standard and optimized X-gates on real quantum hardware (e.g., ibm_torino) or a noisy simulator.
+Visualization: Bloch sphere visualizations, histograms of measurement outcomes, and optimized pulse plots.
+Noise Model: Simulation of quantum errors (bit-flip, phase-flip, and depolarizing errors).
+Results: Fidelity comparisons and saved outputs (circuit diagrams, plots, and text files).
+
+Project Structure
+
+main.py: Core Python script implementing the quantum gate optimization, circuit creation, and visualization.
+results/: Directory containing output files (circuit diagrams, Bloch sphere plots, histograms, pulse plots, and result summaries).
+requirements.txt: List of required Python packages.
+
+Features
+
+Custom X-Gate Optimization: Uses a GRAPE-like algorithm to optimize control pulses for a quantum X-gate, achieving high fidelity (up to 1.0000).
+Noise Simulation: Incorporates a realistic noise model with bit-flip, phase-flip, and depolarizing errors.
+Backend Flexibility: Supports execution on IBM Quantum backends (e.g., ibm_torino, ibm_brisbane) or AerSimulator with a noise model.
+Visualizations:
+Bloch sphere plots for standard and optimized X-gates across initial states (|0⟩, |1⟩, |+⟩, |-⟩).
+Histograms comparing measurement outcomes.
+Plot of optimized control pulse amplitudes.
+
+
+Result Storage: Saves circuit diagrams, plots, and fidelity results with timestamps.
+
+Prerequisites
+
+Python 3.8+
+IBM Quantum account (optional, for real backend execution)
+Required Python packages (see requirements.txt):
+qiskit
+qiskit-aer
+qiskit-ibm-runtime
+numpy
+matplotlib
+scipy
+
+Installation
+
+Clone the Repository:
+git clone https://github.com/<your-username>/quantumx-capstone.git
+cd quantumx-capstone
+
+Set Up a Virtual Environment (recommended):
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+Install Dependencies:
+pip install -r requirements.txt
+
+Optional: IBM Quantum API Key:
+Obtain an API key from IBM Quantum.
+The script prompts for the API key during execution. If not provided, it defaults to the AerSimulator.
+
+Usage
+
+Run the Script:
+python main.py
+
+If you have an IBM Quantum API key, enter it when prompted to use a real quantum backend (e.g., ibm_torino).
+Otherwise, press Enter to use the AerSimulator with a noise model.
+
+
+Outputs:
+
+Results Directory: The results/ folder will contain:
+Circuit diagram (circuit_<timestamp>.png)
+Bloch sphere plots (bloch_standard_<timestamp>.png, bloch_optimized_<timestamp>.png)
+Histogram comparison (comparison_<timestamp>.png)
+Optimized pulse plot (pulse_<timestamp>.png)
+Text file with fidelity and amplitude data (results_<timestamp>.txt)
+
+Console Output: Displays backend selection, optimization progress, fidelity results, and job IDs (for real backends).
+
+Expected Results:
+
+Optimized pulse fidelity: ~1.0000
+Standard X-gate fidelity: 1.0000
+Visualizations for Bloch spheres and measurement histograms.
+
+Results
+Real Quantum Backend (e.g., ibm_torino)
+
+Available Backends: ibm_torino, ibm_brisbane
+Optimized Pulse Fidelity: 1.0000
+Standard X-Gate Fidelity: 1.0000
+Job IDs:
+Standard X-gate: d2k5ld0hsgmc73b3qmbg
+Optimized X-gate: d2k5ldfa6cjs73f9ltjg
+
+Visualizations: Circuit diagrams, Bloch sphere plots, and histograms saved in results/.
+
+Simulator with Noise Model
+
+Backend: AerSimulator with custom noise model (bit-flip, phase-flip, depolarizing errors).
+Optimized Pulse Fidelity: 1.0000
+Standard X-Gate Fidelity: 1.0000
+Visualizations: Similar outputs saved in results/.
+
+Code Details
+
+Hamiltonian: Simplified to zero (H0 = np.zeros((2,2))) for testing; can be restored to 0.5 * omega * sigma_z for realistic dynamics.
+Optimization: GRAPE-like algorithm with 40 time steps, 100 iterations, and a learning rate of 0.05.
+Noise Model: Combines 1-qubit errors (bit-flip, phase-flip, depolarizing) and optional 2-qubit depolarizing error for cx gates.
+Execution: Circuits are transpiled and run with 1000 shots, either on a real backend or simulator.
+
+Contributing
+Contributions are welcome! Please:
+
+Fork the repository.
+Create a feature branch (git checkout -b feature-name).
+Commit changes (git commit -m "Add feature").
+Push to the branch (git push origin feature-name).
+Open a pull request.
+
+License
+This project is licensed under the MIT License. See the LICENSE file for details.
+Acknowledgments
+
+IBM Quantum: For access to quantum backends and Qiskit tools.
+Qiskit Community: For comprehensive documentation and tutorials.
 
