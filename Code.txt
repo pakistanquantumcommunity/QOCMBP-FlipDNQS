@@ -1,0 +1,294 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.linalg import expm
+from qiskit import QuantumCircuit, transpile
+from qiskit.quantum_info import Operator, average_gate_fidelity, Statevector
+from qiskit_aer import AerSimulator
+from qiskit_aer.noise import NoiseModel, depolarizing_error, kraus_error
+from qiskit.visualization import plot_histogram, plot_bloch_vector
+from getpass import getpass
+from datetime import datetime
+import os
+
+# ----------------------------- Configuration -----------------------------
+np.random.seed(60)
+api_key = getpass("Enter your IBM Quantum API key (or press Enter to use simulator only): ")
+instance_name = "crn:v1:bluemix:public:quantum-computing:us-east:a/e7d25a6bca7546feb3e95f3e5d293610:22b59ee1-8555-419d-8ed2-5fe8879e0964::"
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+output_dir = "results"
+os.makedirs(output_dir, exist_ok=True)
+
+# ----------------------------- Backend Selection -----------------------------
+use_real_backend = False
+backend = None
+service = None
+dt = 2.22e-10
+
+if api_key:
+    try:
+        from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+        service = QiskitRuntimeService(channel="ibm_quantum_platform", token=api_key, instance=instance_name)
+        available_backends = service.backends()
+        print(f"Available backends: {[b.name for b in available_backends]}")
+        for b in available_backends:
+            if 'simulator' not in b.name.lower():
+                backend = b
+                break
+        if backend is None and available_backends:
+            backend = available_backends[0]
+        if backend:
+            print(f"Using backend: {backend.name}")
+            dt = backend.configuration().dt
+            use_real_backend = True
+        else:
+            raise Exception("No backends available")
+    except Exception as e:
+        print(f"⚠ Using simulator instead: {e}")
+        backend = AerSimulator()
+        use_real_backend = False
+else:
+    print("Using simulator (no API key provided)")
+    backend = AerSimulator()
+    use_real_backend = False
+
+# ----------------------------- System Hamiltonian -----------------------------
+hbar = 1.0
+omega = 5.0 * 2 * np.pi
+sigma_x = np.array([[0, 1], [1, 0]])
+sigma_z = np.array([[1, 0], [0, -1]])
+
+# H0 temporarily zero for testing
+H0 = np.zeros((2, 2), dtype=complex)
+# H0 = 0.5 * omega * sigma_z  # restore realistic dynamics if needed
+
+target_unitary = Operator.from_label('X')
+
+# ----------------------------- Noise Model -----------------------------
+noise_model = NoiseModel()
+
+# 1-qubit errors
+bit_flip_error = kraus_error([
+    np.sqrt(0.01) * np.array([[0, 1], [1, 0]]),
+    np.sqrt(0.99) * np.eye(2)
+])
+
+phase_flip_error = kraus_error([
+    np.sqrt(0.01) * np.array([[1, 0], [0, -1]]),
+    np.sqrt(0.99) * np.eye(2)
+])
+
+depolarizing_error_op = depolarizing_error(0.01, 1)
+
+# Combine all 1-qubit errors
+combined_1q_error = bit_flip_error.compose(phase_flip_error).compose(depolarizing_error_op)
+noise_model.add_all_qubit_quantum_error(combined_1q_error, ['u3'])
+
+# Optional: add 2-qubit depolarizing error to 'cx'
+two_qubit_error = depolarizing_error(0.01, 2)
+noise_model.add_all_qubit_quantum_error(two_qubit_error, ['cx'])
+
+# ----------------------------- Unitary Computation (Manual) -----------------------------
+def compute_unitary_manual(amplitudes, duration, n_steps):
+    dt_step = duration / n_steps
+    U = np.eye(2, dtype=complex)
+    for i in range(n_steps):
+        H_total = H0 + amplitudes[i] * sigma_x
+        U_step = expm(-1j * H_total * dt_step)
+        U = U_step @ U
+    return U
+
+# ----------------------------- GRAPE-like Optimization -----------------------------
+def optimize_pulse(duration=160, n_steps=40):
+    control_amplitudes = np.random.uniform(5.0, 10.0, n_steps)
+    max_iter = 100
+    learning_rate = 0.05
+    best_amplitudes = control_amplitudes.copy()
+    best_fidelity = 0.0
+    epsilon = 0.01
+   
+    for iteration in range(max_iter):
+        U = compute_unitary_manual(control_amplitudes, duration, n_steps)
+        fidelity = average_gate_fidelity(Operator(U), target_unitary)
+       
+        if fidelity > best_fidelity:
+            best_fidelity = fidelity
+            best_amplitudes = control_amplitudes.copy()
+           
+        grad = np.zeros_like(control_amplitudes)
+        for i in range(n_steps):
+            amp_plus = control_amplitudes.copy()
+            amp_minus = control_amplitudes.copy()
+            amp_plus[i] += epsilon
+            amp_minus[i] -= epsilon
+           
+            fid_plus = average_gate_fidelity(
+                Operator(compute_unitary_manual(amp_plus, duration, n_steps)),
+                target_unitary
+            )
+            fid_minus = average_gate_fidelity(
+                Operator(compute_unitary_manual(amp_minus, duration, n_steps)),
+                target_unitary
+            )
+            grad[i] = (fid_plus - fid_minus) / (2 * epsilon)
+           
+        control_amplitudes += learning_rate * grad
+        control_amplitudes = np.clip(control_amplitudes, -15.0, 15.0)
+       
+        if iteration % 10 == 0:
+            print(f"Iteration {iteration}: Fidelity = {fidelity:.4f}")
+           
+    return best_amplitudes, best_fidelity
+
+# ----------------------------- Optimize Pulse -----------------------------
+print("Starting pulse optimization...")
+optimized_amplitudes, fidelity = optimize_pulse()
+print(f"Optimized Pulse Fidelity: {fidelity:.4f}")
+
+# ----------------------------- Create Custom Gate -----------------------------
+def create_custom_x_gate(amplitudes, duration, n_steps):
+    U = compute_unitary_manual(amplitudes, duration, n_steps)
+    return Operator(U)
+
+custom_x_gate = create_custom_x_gate(optimized_amplitudes, 160, 40)
+standard_x_gate = Operator.from_label('X')
+
+# ----------------------------- Circuits -----------------------------
+qc_standard = QuantumCircuit(1, 1)
+qc_standard.unitary(standard_x_gate, [0], label='standard_x')
+qc_standard.measure(0, 0)
+
+qc_optimized = QuantumCircuit(1, 1)
+qc_optimized.unitary(custom_x_gate, [0], label='optimized_x')
+qc_optimized.measure(0, 0)
+
+circuit_img_path = os.path.join(output_dir, f"circuit_{timestamp}.png")
+qc_optimized.draw(output='mpl', fold=-1).savefig(circuit_img_path)
+print(f"Circuit diagram saved to {circuit_img_path}")
+
+# ----------------------------- Execution -----------------------------
+if use_real_backend and service is not None:
+    try:
+        qc_standard_transpiled = transpile(qc_standard, backend)
+        qc_optimized_transpiled = transpile(qc_optimized, backend)
+       
+        sampler = Sampler(backend)
+        job_standard = sampler.run([qc_standard_transpiled], shots=1000)
+        job_optimized = sampler.run([qc_optimized_transpiled], shots=1000)
+       
+        print(" Jobs submitted successfully!")
+        print(f"Standard X-gate Job ID: {job_standard.job_id()}")
+        print(f"Optimized X-gate Job ID: {job_optimized.job_id()}")
+       
+        result_standard = job_standard.result()
+        result_optimized = job_optimized.result()
+        counts_standard = result_standard[0].data.c.get_counts()
+        counts_optimized = result_optimized[0].data.c.get_counts()
+       
+    except Exception as e:
+        print(f" Error: {e}. Falling back to simulator...")
+        use_real_backend = False
+
+if not use_real_backend:
+    print("Running on simulator with noise model")
+    simulator = AerSimulator(noise_model=noise_model)
+    qc_standard_transpiled = transpile(qc_standard, simulator)
+    qc_optimized_transpiled = transpile(qc_optimized, simulator)
+   
+    result_standard = simulator.run(qc_standard_transpiled, shots=1000).result()
+    counts_standard = result_standard.get_counts()
+   
+    result_optimized = simulator.run(qc_optimized_transpiled, shots=1000).result()
+    counts_optimized = result_optimized.get_counts()
+
+# ----------------------------- Bloch Sphere Visualization -----------------------------
+def state_to_bloch_vector(state):
+    """Convert a statevector to a Bloch vector"""
+    # Extract the state components
+    if isinstance(state, Statevector):
+        alpha = state.data[0]
+        beta = state.data[1]
+    else:
+        alpha = state[0]
+        beta = state[1]
+   
+    # Calculate the Bloch vector components
+    x = 2 * np.real(np.conj(alpha) * beta)
+    y = 2 * np.imag(np.conj(alpha) * beta)
+    z = np.abs(alpha)**2 - np.abs(beta)**2
+   
+    return [x, y, z]
+
+def visualize_bloch_sphere(gate, title, filename):
+    # Test the gate on different initial states
+    initial_states = [
+        Statevector.from_label('0'),  # |0⟩
+        Statevector.from_label('1'),  # |1⟩
+        Statevector([1/np.sqrt(2), 1/np.sqrt(2)]),  # |+⟩
+        Statevector([1/np.sqrt(2), -1/np.sqrt(2)]),  # |-⟩
+    ]
+   
+    state_names = ['|0⟩', '|1⟩', '|+⟩', '|-⟩']
+   
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10), subplot_kw={'projection': '3d'})
+    axes = axes.flatten()
+   
+    for i, (initial_state, state_name) in enumerate(zip(initial_states, state_names)):
+        # Apply the gate
+        final_state = initial_state.evolve(gate)
+       
+        # Get Bloch vector coordinates using our custom function
+        bloch_vector = state_to_bloch_vector(final_state)
+       
+        # Plot on Bloch sphere
+        plot_bloch_vector(bloch_vector, ax=axes[i], title=f"{title} applied to {state_name}")
+   
+    plt.suptitle(f'Bloch Sphere Visualization: {title}')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, filename))
+    plt.show()
+
+# Visualize both gates on Bloch sphere
+print("Visualizing standard X gate on Bloch sphere...")
+visualize_bloch_sphere(standard_x_gate, "Standard X Gate", f"bloch_standard_{timestamp}.png")
+
+print("Visualizing optimized X gate on Bloch sphere...")
+visualize_bloch_sphere(custom_x_gate, "Optimized X Gate", f"bloch_optimized_{timestamp}.png")
+
+# ----------------------------- Plot Results -----------------------------
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+plot_histogram(counts_standard, ax=ax1, title='Standard Pulse (Noisy X-gate)')
+ax1.set_xlabel('Measurement Outcome')
+ax1.set_ylabel('Count')
+
+plot_histogram(counts_optimized, ax=ax2, title='Optimized Pulse (Noisy X-gate)')
+ax2.set_xlabel('Measurement Outcome')
+ax2.set_ylabel('Count')
+
+plt.suptitle(f'Execution on: {backend.name}', fontsize=14)
+plt.tight_layout()
+plt.savefig(f"{output_dir}/comparison_{timestamp}.png")
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(optimized_amplitudes)
+plt.title('Optimized Control Pulse')
+plt.xlabel('Time step')
+plt.ylabel('Amplitude')
+plt.grid(True)
+plt.savefig(f"{output_dir}/pulse_{timestamp}.png")
+plt.show()
+
+# ----------------------------- Fidelity Comparison -----------------------------
+print(f"Standard X-gate fidelity: {average_gate_fidelity(standard_x_gate, target_unitary):.4f}")
+print(f"Optimized X-gate fidelity: {fidelity:.4f}")
+
+# ----------------------------- Save Results -----------------------------
+with open(f"{output_dir}/results_{timestamp}.txt", "w") as f:
+    f.write(f"Backend: {backend.name}\n")
+    f.write(f"Timestamp: {timestamp}\n")
+    f.write(f"Standard fidelity: {average_gate_fidelity(standard_x_gate, target_unitary):.4f}\n")
+    f.write(f"Optimized fidelity: {fidelity:.4f}\n")
+    f.write("Optimized amplitudes:\n")
+    f.write(str(optimized_amplitudes.tolist()))
+
+print(f" Results saved to {output_dir}/")
